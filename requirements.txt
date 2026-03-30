@@ -1,0 +1,4 @@
+browser-use
+anthropic
+playwright
+httpx

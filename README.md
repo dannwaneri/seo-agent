@@ -296,6 +296,8 @@ python main.py --pro --email you@example.com --auto
 
 The email includes pass/fail counts, any URLs flagged for human review, and the PDF as an attachment. If the PDF was not generated, the body includes a note indicating it is unavailable.
 
+Commercial use of premium features requires a valid license key. Using premium features without a purchased license for commercial purposes violates the terms of this repository.
+
 ---
 
 ## Environment Variables

@@ -18,6 +18,7 @@ I ran it on my own published articles. Every single one failed.
 - [Cost](#cost)
 - [Scheduling](#scheduling)
 - [Premium Features](#premium-features)
+- [Environment Variables](#environment-variables)
 - [Architecture](#architecture)
 - [Contributing](#contributing)
 - [Tutorial](#tutorial)
@@ -244,6 +245,72 @@ Provide a text file containing a sample of your writing. The Sonnet opening para
 python main.py --pro --rewrite --voice-sample my-writing-sample.txt --auto
 ```
 
+### PageSpeed Insights (`--pagespeed`)
+
+Checks Google PageSpeed Insights for every audited URL and adds performance metrics to each result. Requires `PAGESPEED_API_KEY` (free at [console.cloud.google.com](https://console.cloud.google.com)).
+
+```bash
+python main.py --pro --pagespeed --auto
+```
+
+Adds to each result:
+
+| Field | Description |
+|-------|-------------|
+| `score` | Mobile performance score (0–100) |
+| `mobile_score` | Mobile performance score |
+| `desktop_score` | Desktop performance score |
+| `lcp` | Largest Contentful Paint (seconds) |
+| `cls` | Cumulative Layout Shift (float) |
+| `inp` | Interaction to Next Paint (milliseconds) |
+| `status` | `PASS` if mobile score ≥ 70, `FAIL` if < 70 |
+
+Performance scores also appear as a dedicated section in the PDF report.
+
+### Structured data validation (`--structured-data`)
+
+Validates JSON-LD structured data on every audited URL. No API key required — runs entirely locally.
+
+```bash
+python main.py --pro --structured-data --auto
+```
+
+Detects missing, malformed, or incomplete schema markup and returns one of four statuses per URL:
+
+| Status | Meaning |
+|--------|---------|
+| `PASS` | All blocks valid JSON with `@context` and `@type` |
+| `WARN` | All blocks valid JSON but at least one missing `@type` |
+| `FAIL` | At least one block is malformed JSON or missing `@context` |
+| `MISSING` | No JSON-LD found on the page |
+
+Flags are specific: e.g. `"Block 1: invalid JSON — Expecting property name"`, `"Block 2: missing @type field"`. Results appear in the PDF report alongside SEO fields.
+
+### Email delivery (`--email RECIPIENT`)
+
+Sends the PDF report to the specified email address after the run completes. Requires five SMTP environment variables (see [Environment Variables](#environment-variables) below).
+
+```bash
+python main.py --pro --email you@example.com --auto
+```
+
+The email includes pass/fail counts, any URLs flagged for human review, and the PDF as an attachment. If the PDF was not generated, the body includes a note indicating it is unavailable.
+
+---
+
+## Environment Variables
+
+| Variable | Required for | Notes |
+|----------|-------------|-------|
+| `ANTHROPIC_API_KEY` | All users | Claude API access |
+| `SEO_AGENT_LICENSE` | `--pro` | Purchase at [github.com/dannwaneri/seo-agent](https://github.com/dannwaneri/seo-agent) |
+| `PAGESPEED_API_KEY` | `--pagespeed` | Free at [console.cloud.google.com](https://console.cloud.google.com) |
+| `SMTP_HOST` | `--email` | e.g. `smtp.gmail.com` |
+| `SMTP_PORT` | `--email` | e.g. `587` |
+| `SMTP_USER` | `--email` | Your email address |
+| `SMTP_PASSWORD` | `--email` | App password recommended |
+| `SMTP_FROM` | `--email` | Sender address |
+
 ---
 
 ## Architecture
@@ -268,10 +335,13 @@ seo-agent/
 │
 └── premium/              # Proprietary — not open for contributions
     ├── __init__.py
-    ├── cost_curve.py      # Three-tier routing logic
-    ├── multi_client.py    # Project folder management
+    ├── cost_curve.py         # Three-tier routing logic
+    ├── multi_client.py       # Project folder management
     ├── enhanced_reporter.py  # PDF generation with severity ratings
-    └── rewrite_agent.py   # AI-powered rewrite suggestions
+    ├── rewrite_agent.py      # AI-powered rewrite suggestions
+    ├── pagespeed.py          # Google PageSpeed Insights integration
+    ├── structured_data.py    # JSON-LD extraction and validation
+    └── email_reporter.py     # SMTP email delivery with PDF attachment
 ```
 
 **`core/`** contains the complete, fully functional audit engine. It is MIT licensed and accepts pull requests. You can run the entire audit pipeline using only `core/` — no premium code is loaded unless you pass `--pro`.

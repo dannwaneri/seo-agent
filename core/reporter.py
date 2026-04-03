@@ -4,7 +4,8 @@ import json
 import os
 import sys
 
-_DIR = os.path.dirname(os.path.abspath(__file__))
+# report files live in the project root, one level above core/
+_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPORT_JSON = os.path.join(_DIR, "report.json")
 REPORT_SUMMARY = os.path.join(_DIR, "report-summary.txt")
 

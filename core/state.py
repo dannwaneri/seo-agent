@@ -1,9 +1,10 @@
 import json
 import os
 
-STATE_FILE = os.path.join(os.path.dirname(__file__), "state.json")
+# state.json lives in the project root, one level above core/
+STATE_FILE = os.path.join(os.path.dirname(__file__), "..", "state.json")
 
-_DEFAULT_STATE = {"audited": [], "pending": [], "needs_human": []}
+_DEFAULT_STATE = {"audited": [], "pending": [], "needs_human": [], "history": []}
 
 
 def load_state() -> dict:
@@ -33,4 +34,11 @@ def mark_audited(state: dict, url: str) -> None:
     # Remove from pending if present
     if url in state["pending"]:
         state["pending"].remove(url)
+    save_state(state)
+
+
+def append_run_record(record: dict) -> None:
+    """Append a run summary record to state["history"] and persist to disk."""
+    state = load_state()
+    state["history"].append(record)
     save_state(state)

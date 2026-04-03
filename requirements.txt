@@ -2,3 +2,5 @@ browser-use
 anthropic
 playwright
 httpx
+weasyprint
+fpdf2

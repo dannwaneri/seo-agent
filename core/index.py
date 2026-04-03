@@ -3,14 +3,21 @@ import os
 import sys
 import time
 
-from browser import fetch_page
-from extractor import extract
-from hitl import add_to_human_review, pause_and_prompt, should_pause
-from linkchecker import check_links
-from reporter import write_result, write_summary
-from state import is_audited, load_state, mark_audited
+# Allow `python core/index.py` to work with relative imports by setting the
+# package context before any relative imports are resolved.
+if __name__ == "__main__" and __package__ is None:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    __package__ = "core"
 
-INPUT_CSV = os.path.join(os.path.dirname(__file__), "input.csv")
+from .browser import fetch_page
+from .extractor import extract
+from .hitl import add_to_human_review, pause_and_prompt, should_pause
+from .linkchecker import check_links
+from .reporter import write_result, write_summary
+from .state import is_audited, load_state, mark_audited
+
+# input.csv lives in the project root, one level above core/
+INPUT_CSV = os.path.join(os.path.dirname(__file__), "..", "input.csv")
 INTER_URL_DELAY = 2  # seconds between URLs
 
 
@@ -148,7 +155,8 @@ def _pause_reason(snapshot: dict) -> str:
 def _count_passed() -> dict:
     """Read report.json and count pass/total for the final summary line."""
     import json
-    report_path = os.path.join(os.path.dirname(__file__), "report.json")
+    # report.json lives in the project root, one level above core/
+    report_path = os.path.join(os.path.dirname(__file__), "..", "report.json")
     if not os.path.exists(report_path):
         return {"passed": 0, "total": 0}
     with open(report_path, encoding="utf-8") as f:

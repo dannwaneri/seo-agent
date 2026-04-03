@@ -115,7 +115,6 @@ if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "real"
 
     if mode == "test-missing":
-        # Acceptance test 2: missing title + missing canonical → both FAIL
         snapshot = {
             "final_url": "https://example.com/test",
             "status_code": 200,
@@ -125,14 +124,12 @@ if __name__ == "__main__":
             "canonical": None,
         }
     elif mode == "test-fences":
-        # Acceptance test 3: simulate Claude wrapping in ```json fences
         fenced = '```json\n{"url":"https://x.com","final_url":"https://x.com","status_code":200,"title":{"value":"X","length":1,"status":"PASS"},"description":{"value":"desc","length":4,"status":"PASS"},"h1":{"count":1,"value":"X","status":"PASS"},"canonical":{"value":"https://x.com","status":"PASS"},"flags":[],"human_review":false,"audited_at":"2026-01-01T00:00:00+00:00"}\n```'
         stripped = _strip_fences(fenced)
         result = json.loads(stripped)
         print(json.dumps(result, indent=2))
         sys.exit(0)
     else:
-        # Acceptance test 1: real dev.to snapshot (run browser.py first)
         snapshot = {
             "final_url": "https://dev.to/dannwaneri",
             "status_code": 200,

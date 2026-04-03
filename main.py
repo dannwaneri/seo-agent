@@ -119,10 +119,23 @@ def run_audit(args: argparse.Namespace, paths: dict) -> dict:
 
     Handles both free and pro paths based on args.
     """
-    pro         = is_pro()
-    use_tiered  = pro and args.tiered
-    use_rewrite = pro and args.rewrite
-    auto        = args.auto
+    pro                = is_pro()
+    use_tiered         = pro and args.tiered
+    use_rewrite        = pro and args.rewrite
+    use_pagespeed      = pro and getattr(args, "pagespeed", False)
+    use_structured_data = pro and getattr(args, "structured_data", False)
+    email_recipient    = getattr(args, "email", None) if pro else None
+    auto               = args.auto
+
+    # Resolve PageSpeed API key once at startup
+    pagespeed_key = None
+    if use_pagespeed:
+        import logging as _logging
+        from config import get_pagespeed_key as _get_pagespeed_key
+        pagespeed_key = _get_pagespeed_key()
+        if pagespeed_key is None:
+            _logging.warning("PAGESPEED_API_KEY not set -- skipping performance checks")
+            use_pagespeed = False
 
     # Pro-only extractor (import only when needed)
     if use_tiered:
@@ -201,7 +214,21 @@ def run_audit(args: argparse.Namespace, paths: dict) -> dict:
             final_url = snapshot.get("final_url") or url
             result["broken_links"] = check_links(raw_links, final_url)
 
-            # d. Rewrite suggestions (pro only)
+            # d. PageSpeed Insights (pro + --pagespeed)
+            if use_pagespeed and pagespeed_key:
+                from premium.pagespeed import check_pagespeed
+                perf = check_pagespeed(url, pagespeed_key)
+                if perf is not None:
+                    result["performance"] = perf
+
+            # e. Structured data / JSON-LD (pro + --structured-data)
+            if use_structured_data:
+                from premium.structured_data import extract_json_ld
+                result["structured_data"] = extract_json_ld(
+                    snapshot.get("json_ld_blocks") or []
+                )
+
+            # f. Rewrite suggestions (pro only)
             if use_rewrite:
                 voice_sample = None
                 if args.voice_sample and os.path.isfile(args.voice_sample):
@@ -233,6 +260,7 @@ def run_audit(args: argparse.Namespace, paths: dict) -> dict:
     write_summary()
 
     # g. Pro: generate PDF
+    generated_pdf_path = None
     if pro and (urls_audited > 0):
         from premium.enhanced_reporter import generate_pdf
         project_name = args.project or "default"
@@ -240,9 +268,25 @@ def run_audit(args: argparse.Namespace, paths: dict) -> dict:
         os.makedirs(paths["reports_dir"], exist_ok=True)
         try:
             generate_pdf(results, project_name, pdf_path)
+            generated_pdf_path = pdf_path
             print(f"PDF report saved to {pdf_path}")
         except Exception as exc:
             print(f"[main] PDF generation failed: {exc}", file=sys.stderr)
+
+    # h. Pro: email report
+    if pro and email_recipient:
+        from premium.email_reporter import send_report_email
+        project_name = getattr(args, "project", None) or "default"
+        summary_dict = {
+            "pass_count":  pass_count,
+            "fail_count":  fail_count,
+            "needs_human": state.get("needs_human") or [],
+        }
+        sent = send_report_email(
+            email_recipient, project_name, summary_dict, generated_pdf_path
+        )
+        if sent:
+            print(f"Report emailed to {email_recipient}")
 
     return {
         "urls_audited": urls_audited,
@@ -266,8 +310,11 @@ def main() -> None:
     parser.add_argument("--pro",          action="store_true", help="Enable premium features")
     parser.add_argument("--tiered",       action="store_true", help="Use cost-curve routing [requires --pro]")
     parser.add_argument("--rewrite",      action="store_true", help="Generate rewrite suggestions [requires --pro]")
-    parser.add_argument("--auto",         action="store_true", help="Auto-skip URLs requiring human review")
-    parser.add_argument("--voice-sample", metavar="PATH",      help="Path to voice sample file [requires --rewrite]")
+    parser.add_argument("--auto",            action="store_true", help="Auto-skip URLs requiring human review")
+    parser.add_argument("--voice-sample",    metavar="PATH",      help="Path to voice sample file [requires --rewrite]")
+    parser.add_argument("--email",           metavar="RECIPIENT", help="Email report to this address after run [requires --pro]")
+    parser.add_argument("--pagespeed",       action="store_true", help="Enable PageSpeed Insights check per URL [requires --pro]")
+    parser.add_argument("--structured-data", action="store_true", help="Enable JSON-LD structured data validation [requires --pro]")
     args = parser.parse_args()
 
     # --- Flag dependency checks ---
@@ -279,6 +326,15 @@ def main() -> None:
         sys.exit(1)
     if args.voice_sample and not args.rewrite:
         print("ERROR: --voice-sample requires --rewrite", file=sys.stderr)
+        sys.exit(1)
+    if args.pagespeed and not args.pro:
+        print("This feature requires --pro", file=sys.stderr)
+        sys.exit(1)
+    if args.structured_data and not args.pro:
+        print("This feature requires --pro", file=sys.stderr)
+        sys.exit(1)
+    if args.email and not args.pro:
+        print("This feature requires --pro", file=sys.stderr)
         sys.exit(1)
 
     # --- License check (exits if --pro without key) ---

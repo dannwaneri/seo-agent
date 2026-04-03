@@ -110,7 +110,75 @@ td { padding: 6px 10px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
 .method-tag { font-size: 10px; color: #718096; margin-top: 8px; }
 .common-fails { margin-top: 10px; }
 .common-fails li { margin: 3px 0 3px 18px; }
+.badge-warn    { background: #fefcbf; color: #744210; }
+.badge-missing { background: #e2e8f0; color: #4a5568; }
+.metrics { display: flex; gap: 20px; margin: 8px 0; flex-wrap: wrap; }
+.metric  { background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px 14px; min-width: 80px; }
+.metric .val { font-size: 15px; font-weight: bold; }
+.metric .lbl { font-size: 10px; color: #718096; text-transform: uppercase; letter-spacing: .4px; }
+.not-checked { background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 4px;
+               padding: 10px 14px; color: #a0aec0; font-size: 12px; font-style: italic; margin: 8px 0; }
+.flags-list { margin: 6px 0 0 18px; }
+.flags-list li { margin: 2px 0; color: #c53030; font-size: 12px; }
 """
+
+
+def _performance_html(result: dict) -> str:
+    perf = result.get("performance")
+    if perf is None:
+        return '<h3>Performance</h3><div class="not-checked">Not checked</div>'
+
+    mobile = perf.get("mobile_score")
+    desktop = perf.get("desktop_score")
+    lcp = perf.get("lcp")
+    cls_ = perf.get("cls")
+    inp = perf.get("inp")
+    status = perf.get("status", "FAIL")
+
+    def score_badge(score):
+        if score is None:
+            return '<span class="badge badge-missing">N/A</span>'
+        cls = "badge-pass" if score >= 70 else "badge-fail"
+        return f'<span class="badge {cls}">{score}</span>'
+
+    overall_cls = "badge-pass" if status == "PASS" else "badge-fail"
+
+    return f"""<h3>Performance</h3>
+<div class="metrics">
+  <div class="metric"><div class="val">{score_badge(mobile)}</div><div class="lbl">Mobile Score</div></div>
+  <div class="metric"><div class="val">{score_badge(desktop)}</div><div class="lbl">Desktop Score</div></div>
+  <div class="metric"><div class="val">{lcp if lcp is not None else "—"}s</div><div class="lbl">LCP</div></div>
+  <div class="metric"><div class="val">{cls_ if cls_ is not None else "—"}</div><div class="lbl">CLS</div></div>
+  <div class="metric"><div class="val">{inp if inp is not None else "—"}ms</div><div class="lbl">INP</div></div>
+</div>
+<p>Overall: <span class="badge {overall_cls}">{status}</span></p>"""
+
+
+def _structured_data_html(result: dict) -> str:
+    sd = result.get("structured_data")
+    if sd is None:
+        return '<h3>Structured Data</h3><div class="not-checked">Not checked</div>'
+
+    status = sd.get("status", "MISSING")
+    blocks = sd.get("blocks") or []
+    flags = sd.get("flags") or []
+
+    _badge_map = {
+        "PASS":    "badge-pass",
+        "WARN":    "badge-warn",
+        "FAIL":    "badge-fail",
+        "MISSING": "badge-missing",
+    }
+    badge_cls = _badge_map.get(status, "badge-missing")
+    block_count = len(blocks)
+    flags_html = ""
+    if flags:
+        items = "".join(f"<li>{f}</li>" for f in flags)
+        flags_html = f'<ul class="flags-list">{items}</ul>'
+
+    return f"""<h3>Structured Data</h3>
+<p><span class="badge {badge_cls}">{status}</span> &nbsp; {block_count} block(s) found</p>
+{flags_html}"""
 
 
 def _build_html(results: list, project_name: str) -> str:
@@ -175,6 +243,9 @@ def _build_html(results: list, project_name: str) -> str:
         else:
             issues_html = '<p style="color:#276749;margin:8px 0;">All fields pass — no issues found.</p>'
 
+        perf_html = _performance_html(result)
+        sd_html = _structured_data_html(result)
+
         url_sections.append(f"""
 <div class="url-section">
   <div class="url-header">
@@ -185,6 +256,8 @@ def _build_html(results: list, project_name: str) -> str:
     {screenshot_html}
     <h3>Issues</h3>
     {issues_html}
+    {perf_html}
+    {sd_html}
     <p class="method-tag">Analysis method: {method}</p>
   </div>
 </div>""")
@@ -326,6 +399,50 @@ def _generate_via_fpdf2(results: list, project_name: str, output_path: str) -> N
             pdf.set_font("Helvetica", "", 10)
             pdf.cell(0, 7, "All fields pass -- no issues found.", ln=True)
             pdf.set_text_color(0, 0, 0)
+
+        # Performance section
+        perf = result.get("performance")
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(0, 7, "Performance:", ln=True)
+        pdf.set_font("Helvetica", "", 9)
+        if perf is None:
+            pdf.set_text_color(160, 174, 192)
+            pdf.cell(0, 6, "  Not checked", ln=True)
+            pdf.set_text_color(0, 0, 0)
+        else:
+            status_color = (39, 103, 73) if perf.get("status") == "PASS" else (197, 48, 48)
+            pdf.set_text_color(*status_color)
+            pdf.cell(0, 6, f"  Status: {perf.get('status','?')}  "
+                           f"Mobile: {perf.get('mobile_score','?')}  "
+                           f"Desktop: {perf.get('desktop_score','?')}", ln=True)
+            pdf.set_text_color(0, 0, 0)
+            pdf.cell(0, 6, f"  LCP: {perf.get('lcp','?')}s  "
+                           f"CLS: {perf.get('cls','?')}  "
+                           f"INP: {perf.get('inp','?')}ms", ln=True)
+
+        # Structured data section
+        sd = result.get("structured_data")
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(0, 7, "Structured Data:", ln=True)
+        pdf.set_font("Helvetica", "", 9)
+        if sd is None:
+            pdf.set_text_color(160, 174, 192)
+            pdf.cell(0, 6, "  Not checked", ln=True)
+            pdf.set_text_color(0, 0, 0)
+        else:
+            sd_status = sd.get("status", "MISSING")
+            block_count = len(sd.get("blocks") or [])
+            _sd_colors = {
+                "PASS": (39, 103, 73), "WARN": (116, 66, 16),
+                "FAIL": (197, 48, 48), "MISSING": (113, 128, 150),
+            }
+            pdf.set_text_color(*_sd_colors.get(sd_status, (0, 0, 0)))
+            pdf.cell(0, 6, f"  Status: {sd_status}  Blocks: {block_count}", ln=True)
+            pdf.set_text_color(0, 0, 0)
+            for flag in (sd.get("flags") or []):
+                pdf.set_text_color(197, 48, 48)
+                pdf.multi_cell(0, 5, f"    - {flag}")
+                pdf.set_text_color(0, 0, 0)
 
         method = _method_label(result.get("method", ""))
         pdf.set_font("Helvetica", "I", 8)

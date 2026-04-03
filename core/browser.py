@@ -14,6 +14,8 @@ def fetch_page(url: str) -> dict:
         "h1s": [],
         "canonical": None,
         "raw_links": [],
+        "json_ld_blocks": [],
+        "raw_html": "",
     }
 
     with sync_playwright() as p:
@@ -63,6 +65,21 @@ def fetch_page(url: str) -> dict:
                     el.get_attribute("href")
                     for el in link_elements[:100]
                 ]
+
+                try:
+                    result["json_ld_blocks"] = page.evaluate(
+                        """() => Array.from(
+                            document.querySelectorAll('script[type="application/ld+json"]'),
+                            el => el.textContent
+                        )"""
+                    )
+                except Exception:
+                    pass
+
+                try:
+                    result["raw_html"] = page.content()
+                except Exception:
+                    pass
 
         except PlaywrightTimeout:
             result["status_code"] = first_status["code"] or 408

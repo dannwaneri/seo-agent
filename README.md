@@ -1,8 +1,10 @@
 # seo-agent
 
-A local SEO audit agent built with Python, Browser Use, and the Claude API. Visits real pages in a visible browser window, extracts SEO signals, checks for broken links, and writes a structured report — resumable if interrupted.
+A local SEO co-pilot built with Python, Browser Use, and the Claude API. Visits real pages in a visible browser window, extracts SEO signals, checks for broken links, scores backlinks, surfaces GSC quick wins, maps internal link clusters, and writes structured reports — resumable if interrupted.
 
-I ran it on my own published articles. Every single one failed.
+Ran it on my own sites. Found a title cannibalising its own homepage, a position 9.5 query with 0% CTR, two missing internal links, and an orphan page with no path to it.
+
+Everything is open source.
 
 ---
 
@@ -13,35 +15,43 @@ I ran it on my own published articles. Every single one failed.
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Usage](#usage)
+- [Modules](#modules)
 - [Output](#output)
 - [PASS/FAIL Rules](#passfail-rules)
 - [Cost](#cost)
 - [Scheduling](#scheduling)
-- [Premium Features](#premium-features)
 - [Environment Variables](#environment-variables)
 - [Architecture](#architecture)
 - [Contributing](#contributing)
-- [Tutorial](#tutorial)
+- [Writing](#writing)
 - [License](#license)
 
 ---
 
 ## What It Does
 
-- Reads a URL list from `input.csv`
-- Visits each URL in a real Chromium browser (not a headless scraper)
+**Core audit** (runs on a URL list):
+
+- Visits each URL in a real Chromium browser — not a headless scraper
 - Extracts title, meta description, H1s, and canonical tag via Claude API
 - Checks for broken same-domain links asynchronously using httpx
 - Detects edge cases (404s, login walls, redirects) and pauses for human input
 - Writes results to `report.json` incrementally — safe to interrupt and resume
 - Generates a plain-English `report-summary.txt` on completion
 
+**Standalone modules** (run independently on any data):
+
+- `qualify-backlinks` — score a list of referring domains for niche relevance and traffic quality
+- `gsc-insights` — parse a Search Console export and find quick wins and cannibalisation
+- `relevance-score` — score candidate pages as internal link sources for a target URL
+- `cluster-audit` — map your full site into topic clusters, find orphans and missing hubs
+
 ---
 
 ## Stack
 
 - [Browser Use](https://github.com/browser-use/browser-use) — real browser navigation via Playwright
-- [Anthropic Claude API](https://console.anthropic.com) — structured SEO signal extraction
+- [Anthropic Claude API](https://console.anthropic.com) — structured SEO signal extraction (Haiku for modules, Sonnet for core)
 - [httpx](https://www.python-httpx.org/) — async broken link detection
 - Python 3.11+, flat JSON state files, no database required
 
@@ -60,7 +70,7 @@ playwright install chromium
 
 ## Configuration
 
-Set your API key as an environment variable:
+Set your Anthropic API key:
 
 ```bash
 # macOS/Linux
@@ -68,6 +78,12 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 
 # Windows PowerShell
 $env:ANTHROPIC_API_KEY = "sk-ant-..."
+```
+
+Or add it to a `.env` file in the project root — the agent loads it automatically:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 Add your URLs to `input.csv`:
@@ -83,13 +99,15 @@ https://example.com/contact
 
 ## Usage
 
-Interactive mode — pauses on edge cases (login walls, 404s) and asks what to do:
+### Core audit
+
+Interactive mode — pauses on edge cases (login walls, 404s):
 
 ```bash
 python main.py
 ```
 
-Auto mode — skips edge cases automatically, logs them to `needs_human[]` in state, continues:
+Auto mode — skips edge cases, logs them to `needs_human[]` in state, continues:
 
 ```bash
 python main.py --auto
@@ -102,11 +120,99 @@ python main.py --auto
 # Starting audit: 4 pending, 3 already done.
 ```
 
-You can also run the core module directly (identical behavior, no premium features):
+With project isolation (each client gets separate input, state, and reports):
 
 ```bash
-python core/index.py --auto
+python main.py --project acme --auto
+python main.py --project globex --auto
 ```
+
+With cost-curve tiered routing (cheaper checks first):
+
+```bash
+python main.py --tiered --auto
+```
+
+With AI rewrite suggestions:
+
+```bash
+python main.py --rewrite --auto
+python main.py --rewrite --voice-sample my-writing-sample.txt --auto
+```
+
+### Standalone modules
+
+**Backlink qualifier** — score a `.txt` or `.csv` list of referring domain URLs:
+
+```bash
+python main.py qualify-backlinks backlinks.txt --niche "AI agents python"
+python main.py qualify-backlinks backlinks.txt --niche "SEO tools" --project acme
+```
+
+**GSC insights** — parse a Search Console query export:
+
+```bash
+python main.py gsc-insights gsc-export.csv
+python main.py gsc-insights gsc-export.csv --min-impressions 100 --project acme
+```
+
+**Relevance scorer** — score candidate pages as internal link sources:
+
+```bash
+python main.py relevance-score --target https://example.com/target-page --pages pages.txt
+python main.py relevance-score --target https://example.com/target --pages pages.txt --project acme
+```
+
+**Cluster audit** — map site pages into topic clusters:
+
+```bash
+python main.py cluster-audit --pages pages.txt
+python main.py cluster-audit --pages pages.txt --project acme
+```
+
+---
+
+## Modules
+
+All modules use Claude Haiku. Prompts are in `prompts/`. Results write to markdown files in the project directory or repo root.
+
+### Backlink Qualifier
+
+Scores each referring domain on three axes:
+
+| Signal | Weight | What it measures |
+|--------|--------|-----------------|
+| Niche relevance | 50% | Topical alignment with your target niche (0–100) |
+| Traffic quality | 30% | Estimated real traffic vs. spam traffic (0–100) |
+| Spam score | 20% (inverted) | Link farm signals, thin content, private blog network patterns (0–100) |
+
+**Composite score** = `niche * 0.50 + traffic * 0.30 - spam * 0.20`
+
+Tiers: Insert Worthy (≥80), Useful (60–79), Neutral (40–59), Borderline (20–39), Avoid (<20 or spam >70).
+
+Fetches pages via real browser. Caches results to flat JSON — crash at URL 47, restart at URL 48.
+
+### GSC Insights
+
+Parses a Search Console query export CSV. Flags quick wins: position 4–20, impressions ≥50 (configurable), CTR <5%. Sends the top 50 rows to Haiku with a prompt that specifically asks for queries where two pages compete — the cannibalisation signal you can't see by sorting a spreadsheet.
+
+### Relevance Scorer
+
+Scores candidate pages as sources for internal links pointing at a target URL:
+
+| Signal | Weight | What it measures |
+|--------|--------|-----------------|
+| Topical alignment | 40% | How closely the source page's topic matches the target |
+| Anchor opportunity | 35% | Whether the source page naturally mentions the target's topic |
+| Link equity | 25% | Estimated page strength as a link source |
+
+Checks existing links deterministically before scoring — never recommends a link that already exists.
+
+Tiers: Strong Link (≥75), Good Opportunity (55–74), Possible (35–54), Skip (<35).
+
+### Cluster Audit
+
+Builds the full internal link graph from a page list. Counts incoming links per page — zero incoming means orphan. Sends the complete graph to Haiku: cluster mapping, missing hub detection, cross-cluster link suggestions, and a prioritised fix list.
 
 ---
 
@@ -136,6 +242,8 @@ https://example.com/contact  | FAIL [title, canonical]
 1/3 URLs passed
 ```
 
+Module outputs write to markdown files: `backlink-report.md`, `gsc-insights-report.md`, `relevance-report.md`, `cluster-report.md`.
+
 ---
 
 ## PASS/FAIL Rules
@@ -154,7 +262,7 @@ The 60-character title limit is a display threshold, not a ranking penalty. Titl
 
 ## Cost
 
-The free tier routes every URL through Claude Sonnet for extraction. The premium tier adds a cost curve that routes cheaper checks first.
+The default audit routes every URL through Claude Sonnet. `--tiered` routes cheaper checks first.
 
 | Tier | What runs | Approximate cost per URL |
 |------|-----------|--------------------------|
@@ -162,13 +270,15 @@ The free tier routes every URL through Claude Sonnet for extraction. The premium
 | Tier 2 | Claude Haiku — meta description suggestion | ~$0.0001 |
 | Tier 3 | Claude Sonnet — full extraction + opening paragraph rewrite | ~$0.006 |
 
-Free users always use Tier 3. Premium users with `--tiered` use Tier 1 first, escalate to Tier 2 only when description signals are weak, and escalate to Tier 3 only when deeper extraction is needed. A 20-URL weekly audit at Tier 3 costs about $0.12.
+Without `--tiered`, every URL uses Tier 3. With `--tiered`, Tier 1 runs first and escalates only when needed. A 20-URL audit at Tier 3 costs about $0.12.
+
+Module runs (backlink qualifier, GSC insights, etc.) all use Haiku — cost is negligible for typical site sizes.
 
 ---
 
 ## Scheduling
 
-For weekly agency audits, create a batch file and schedule it with Windows Task Scheduler or cron.
+For weekly audits, schedule a batch file or cron job.
 
 **Windows (`run-audit.bat`):**
 
@@ -188,124 +298,11 @@ python main.py --auto
 
 ---
 
-## Premium Features
-
-Premium features require a license key set as an environment variable:
-
-```bash
-# macOS/Linux
-export SEO_AGENT_LICENSE="your-license-key"
-
-# Windows PowerShell
-$env:SEO_AGENT_LICENSE = "your-license-key"
-```
-
-All premium flags also require `--pro`. Running `--pro` without `SEO_AGENT_LICENSE` set exits immediately with a clear error.
-
-### Multi-client project isolation (`--project`)
-
-Separate input, state, and reports per client. Each project lives in `projects/NAME/`.
-
-```bash
-python main.py --pro --project acme --auto
-python main.py --pro --project globex --auto
-```
-
-Each project gets its own `input.csv`, `state.json`, `report.json`, and `reports/` directory. Projects are created automatically on first run.
-
-### Cost-curve routing (`--tiered`)
-
-Routes each URL through the cheapest check first. Escalates to more expensive models only when needed (see [Cost](#cost) table above).
-
-```bash
-python main.py --pro --tiered --auto
-```
-
-### PDF reports
-
-When running with `--pro`, a formatted PDF report is generated automatically at `reports/audit_report.pdf` (or `projects/NAME/reports/audit_report.pdf` with `--project`). The PDF includes a pass/fail dashboard, per-field severity ratings (HIGH/MEDIUM/LOW), and fix recommendations for every failing field.
-
-### AI rewrite suggestions (`--rewrite`)
-
-Generates structured rewrite suggestions for every audited URL using the cost curve:
-
-- **Tier 1 (free):** title truncation to 60 characters, H1 recommendation, anchor text suggestions for broken links
-- **Tier 2 (Haiku):** meta description suggestion for pages with missing or failing descriptions
-- **Tier 3 (Sonnet):** engaging opening paragraph rewrite
-
-```bash
-python main.py --pro --rewrite --auto
-```
-
-### Voice-matched rewrites (`--voice-sample`)
-
-Provide a text file containing a sample of your writing. The Sonnet opening paragraph rewrite will match your tone and style.
-
-```bash
-python main.py --pro --rewrite --voice-sample my-writing-sample.txt --auto
-```
-
-### PageSpeed Insights (`--pagespeed`)
-
-Checks Google PageSpeed Insights for every audited URL and adds performance metrics to each result. Requires `PAGESPEED_API_KEY` (free at [console.cloud.google.com](https://console.cloud.google.com)).
-
-```bash
-python main.py --pro --pagespeed --auto
-```
-
-Adds to each result:
-
-| Field | Description |
-|-------|-------------|
-| `score` | Mobile performance score (0–100) |
-| `mobile_score` | Mobile performance score |
-| `desktop_score` | Desktop performance score |
-| `lcp` | Largest Contentful Paint (seconds) |
-| `cls` | Cumulative Layout Shift (float) |
-| `inp` | Interaction to Next Paint (milliseconds) |
-| `status` | `PASS` if mobile score ≥ 70, `FAIL` if < 70 |
-
-Performance scores also appear as a dedicated section in the PDF report.
-
-### Structured data validation (`--structured-data`)
-
-Validates JSON-LD structured data on every audited URL. No API key required — runs entirely locally.
-
-```bash
-python main.py --pro --structured-data --auto
-```
-
-Detects missing, malformed, or incomplete schema markup and returns one of four statuses per URL:
-
-| Status | Meaning |
-|--------|---------|
-| `PASS` | All blocks valid JSON with `@context` and `@type` |
-| `WARN` | All blocks valid JSON but at least one missing `@type` |
-| `FAIL` | At least one block is malformed JSON or missing `@context` |
-| `MISSING` | No JSON-LD found on the page |
-
-Flags are specific: e.g. `"Block 1: invalid JSON — Expecting property name"`, `"Block 2: missing @type field"`. Results appear in the PDF report alongside SEO fields.
-
-### Email delivery (`--email RECIPIENT`)
-
-Sends the PDF report to the specified email address after the run completes. Requires five SMTP environment variables (see [Environment Variables](#environment-variables) below).
-
-```bash
-python main.py --pro --email you@example.com --auto
-```
-
-The email includes pass/fail counts, any URLs flagged for human review, and the PDF as an attachment. If the PDF was not generated, the body includes a note indicating it is unavailable.
-
-Commercial use of premium features requires a valid license key. Using premium features without a purchased license for commercial purposes violates the terms of this repository.
-
----
-
 ## Environment Variables
 
 | Variable | Required for | Notes |
 |----------|-------------|-------|
-| `ANTHROPIC_API_KEY` | All users | Claude API access |
-| `SEO_AGENT_LICENSE` | `--pro` | Purchase at [github.com/dannwaneri/seo-agent](https://github.com/dannwaneri/seo-agent) |
+| `ANTHROPIC_API_KEY` | Everything | Claude API access |
 | `PAGESPEED_API_KEY` | `--pagespeed` | Free at [console.cloud.google.com](https://console.cloud.google.com) |
 | `SMTP_HOST` | `--email` | e.g. `smtp.gmail.com` |
 | `SMTP_PORT` | `--email` | e.g. `587` |
@@ -319,14 +316,13 @@ Commercial use of premium features requires a valid license key. Using premium f
 
 ```
 seo-agent/
-├── main.py               # Unified entry point (free + pro flags)
-├── config.py             # License key validation
+├── main.py               # Entry point — core audit + module sub-commands
+├── config.py             # SMTP and PageSpeed config helpers
 ├── input.csv             # Default URL list
 ├── requirements.txt
 ├── .gitignore
 │
-├── core/                 # MIT licensed — PRs welcome
-│   ├── __init__.py
+├── core/                 # Audit engine
 │   ├── browser.py        # Playwright browser driver
 │   ├── extractor.py      # Claude API extraction layer
 │   ├── linkchecker.py    # Async broken link checker
@@ -335,33 +331,32 @@ seo-agent/
 │   ├── state.py          # State persistence + run history
 │   └── index.py          # Standalone core entry point
 │
-└── premium/              # Proprietary — not open for contributions
-    ├── __init__.py
-    ├── cost_curve.py         # Three-tier routing logic
-    ├── multi_client.py       # Project folder management
-    ├── enhanced_reporter.py  # PDF generation with severity ratings
-    ├── rewrite_agent.py      # AI-powered rewrite suggestions
-    ├── pagespeed.py          # Google PageSpeed Insights integration
-    ├── structured_data.py    # JSON-LD extraction and validation
-    └── email_reporter.py     # SMTP email delivery with PDF attachment
+├── modules/              # Standalone analysis modules
+│   ├── backlink_qualifier.py
+│   ├── cluster_audit.py
+│   ├── gsc_insights.py
+│   └── relevance_scorer.py
+│
+├── prompts/              # Haiku prompt templates for each module
+│   ├── backlink_qualifier.md
+│   ├── cluster_audit.md
+│   ├── gsc_insights.md
+│   └── relevance_scorer.md
+│
+└── premium/              # Optional paid features (PDF reports, email delivery)
+    ├── cost_curve.py
+    ├── enhanced_reporter.py
+    ├── rewrite_agent.py
+    ├── pagespeed.py
+    ├── structured_data.py
+    └── email_reporter.py
 ```
-
-**`core/`** contains the complete, fully functional audit engine. It is MIT licensed and accepts pull requests. You can run the entire audit pipeline using only `core/` — no premium code is loaded unless you pass `--pro`.
-
-**`premium/`** contains value-added features built on top of the core. It is proprietary and closed source. The premium modules are never imported unless `--pro` is present and a valid `SEO_AGENT_LICENSE` is set.
 
 ---
 
 ## Contributing
 
-Pull requests are welcome for anything inside `core/`. That includes:
-
-- Bug fixes in the browser driver, extractor, link checker, or reporter
-- Support for new SEO signals (Open Graph tags, schema markup, etc.)
-- Performance improvements to the async link checker
-- Additional PASS/FAIL heuristics
-
-The `premium/` directory is closed. Please do not open PRs that modify files under `premium/`.
+Pull requests are welcome. The full codebase — core audit engine, all four modules, all prompts — is open source.
 
 To contribute:
 
@@ -370,28 +365,32 @@ git clone https://github.com/dannwaneri/seo-agent
 cd seo-agent
 pip install -r requirements.txt
 playwright install chromium
-# make your changes in core/
-# run the inline acceptance tests before submitting
-python core/index.py  # runs __main__ test block if present
+# make your changes
+# run the inline acceptance tests
+python main.py  # runs __main__ test block
 ```
 
 ---
 
-## Tutorial
+## Writing
 
-Full step-by-step walkthrough on freeCodeCamp:
-[How to Build a Local SEO Audit Agent with Browser Use and Claude API](https://www.freecodecamp.org/news/how-to-build-a-local-seo-audit-agent-with-browser-use-and-claude-api)
+Articles about building and running this agent:
+
+- [How to Build a Local SEO Audit Agent with Browser Use and Claude API](https://www.freecodecamp.org/news/how-to-build-a-local-seo-audit-agent-with-browser-use-and-claude-api/) — freeCodeCamp
+- [I Ran My Own SEO Agent on My Two Domains — It Went from 0.4 to 44 in One Afternoon](https://dev.to/dannwaneri/i-ran-my-own-seo-agent-on-my-two-domains-it-went-from-04-to-44-pass-in-one-afternoon-39an) — dev.to
+- [I Was Paying $0.006 per URL for SEO Audits Until I Realized Most Needed $0](https://dev.to/dannwaneri/i-was-paying-0006-per-url-for-seo-audits-until-i-realized-most-needed-0-132j) — dev.to
+- [How to Build a Cost-Efficient AI Agent with Tiered Model Routing](https://www.freecodecamp.org/news/how-to-build-a-cost-efficient-ai-agent-with-tiered-model-routing/) — freeCodeCamp
+- [I Built a Local AI Agent That Audits My Own Articles — It Flagged Every Single One](https://dev.to/dannwaneri/i-built-a-local-ai-agent-that-audits-my-own-articles-it-flagged-every-single-one-pkh) — dev.to
+- [I Gave My SEO Agent a Real Site. It Found Bugs I'd Missed for Weeks.](https://dannwaneri.com) — the co-pilot build with all 4 modules
 
 ---
 
 ## Author
 
-Daniel Nwaneri — [DEV.to](https://dev.to/dannwaneri) · [GitHub](https://github.com/dannwaneri)
+Daniel Nwaneri — [dannwaneri.com](https://dannwaneri.com) · [DEV.to](https://dev.to/dannwaneri) · [GitHub](https://github.com/dannwaneri)
 
 ---
 
 ## License
 
-`core/` is MIT licensed. See [LICENSE](LICENSE).
-
-`premium/` is proprietary. All rights reserved.
+MIT. See [LICENSE](LICENSE).

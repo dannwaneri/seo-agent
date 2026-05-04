@@ -1,9 +1,9 @@
 """
 Unified entry point for seo-agent.
 
-Free users:  python main.py [--project NAME] [--auto]
-Pro users:   python main.py --pro [--project NAME] [--tiered] [--rewrite] [--auto]
-                             [--voice-sample PATH]
+Usage:
+  python main.py [--project NAME] [--auto] [--tiered] [--rewrite]
+  python main.py qualify-backlinks <file> --niche "AI agents python"
 """
 
 import argparse
@@ -19,7 +19,20 @@ REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from config import check_license, is_pro
+# Load .env from repo root if present (no hard dependency on python-dotenv)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(REPO_ROOT, ".env"))
+except ImportError:
+    _env_path = os.path.join(REPO_ROOT, ".env")
+    if os.path.exists(_env_path):
+        with open(_env_path) as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _, _v = _line.partition("=")
+                    os.environ.setdefault(_k.strip(), _v.strip())
+
 from core.browser import fetch_page
 from core.hitl import add_to_human_review, pause_and_prompt, should_pause
 from core.linkchecker import check_links
@@ -114,17 +127,12 @@ def _pause_reason(snapshot: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def run_audit(args: argparse.Namespace, paths: dict) -> dict:
-    """
-    Run the audit loop. Returns run statistics dict.
-
-    Handles both free and pro paths based on args.
-    """
-    pro                = is_pro()
-    use_tiered         = pro and args.tiered
-    use_rewrite        = pro and args.rewrite
-    use_pagespeed      = pro and getattr(args, "pagespeed", False)
-    use_structured_data = pro and getattr(args, "structured_data", False)
-    email_recipient    = getattr(args, "email", None) if pro else None
+    """Run the audit loop. Returns run statistics dict."""
+    use_tiered          = args.tiered
+    use_rewrite         = args.rewrite
+    use_pagespeed       = getattr(args, "pagespeed", False)
+    use_structured_data = getattr(args, "structured_data", False)
+    email_recipient     = getattr(args, "email", None)
     auto               = args.auto
 
     # Resolve PageSpeed API key once at startup
@@ -301,44 +309,179 @@ def run_audit(args: argparse.Namespace, paths: dict) -> dict:
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _run_qualify_backlinks(argv: list[str]) -> None:
+    """Handle: python main.py qualify-backlinks <file> --niche "..." [--project NAME]"""
+    parser = argparse.ArgumentParser(
+        prog="main.py qualify-backlinks",
+        description="Score a list of URLs for backlink opportunity.",
+    )
+    parser.add_argument("input_file", help="Path to .txt or .csv file containing URLs")
+    parser.add_argument("--niche", required=True, metavar="NICHE",
+                        help='Target niche, e.g. "AI agents python"')
+    parser.add_argument("--project", metavar="NAME",
+                        help="Project name — output goes to projects/NAME/")
+    args = parser.parse_args(argv)
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print(
+            "ERROR: ANTHROPIC_API_KEY is not set.\n"
+            "Export it before running:\n"
+            "  export ANTHROPIC_API_KEY=sk-ant-...",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    project_dir = None
+    if args.project:
+        project_dir = os.path.join(REPO_ROOT, "projects", args.project)
+        os.makedirs(project_dir, exist_ok=True)
+
+    from modules.backlink_qualifier import run as qualify_run
+    qualify_run(
+        input_file=args.input_file,
+        niche=args.niche,
+        project_dir=project_dir,
+    )
+
+
+def _run_cluster_audit(argv: list[str]) -> None:
+    """Handle: python main.py cluster-audit --pages file [--project NAME]"""
+    parser = argparse.ArgumentParser(
+        prog="main.py cluster-audit",
+        description="Map site pages into topic clusters and find orphans and missing hubs.",
+    )
+    parser.add_argument("--pages",   required=True, metavar="FILE",
+                        help="Path to .txt or .csv file of site URLs to audit")
+    parser.add_argument("--project", metavar="NAME",
+                        help="Project name — output goes to projects/NAME/")
+    args = parser.parse_args(argv)
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print(
+            "ERROR: ANTHROPIC_API_KEY is not set.\n"
+            "Export it before running:\n"
+            "  export ANTHROPIC_API_KEY=sk-ant-...",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    project_dir = None
+    if args.project:
+        project_dir = os.path.join(REPO_ROOT, "projects", args.project)
+        os.makedirs(project_dir, exist_ok=True)
+
+    from modules.cluster_audit import run as cluster_run
+    cluster_run(
+        pages_file=args.pages,
+        project_dir=project_dir,
+    )
+
+
+def _run_relevance_score(argv: list[str]) -> None:
+    """Handle: python main.py relevance-score --target URL --pages file [--project NAME]"""
+    parser = argparse.ArgumentParser(
+        prog="main.py relevance-score",
+        description="Score candidate pages as internal link opportunities for a target URL.",
+    )
+    parser.add_argument("--target",  required=True, metavar="URL",
+                        help="The page you want to rank — score links pointing to this")
+    parser.add_argument("--pages",   required=True, metavar="FILE",
+                        help="Path to .txt or .csv file of candidate URLs to score")
+    parser.add_argument("--project", metavar="NAME",
+                        help="Project name — output goes to projects/NAME/")
+    args = parser.parse_args(argv)
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print(
+            "ERROR: ANTHROPIC_API_KEY is not set.\n"
+            "Export it before running:\n"
+            "  export ANTHROPIC_API_KEY=sk-ant-...",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    project_dir = None
+    if args.project:
+        project_dir = os.path.join(REPO_ROOT, "projects", args.project)
+        os.makedirs(project_dir, exist_ok=True)
+
+    from modules.relevance_scorer import run as relevance_run
+    relevance_run(
+        target_url=args.target,
+        pages_file=args.pages,
+        project_dir=project_dir,
+    )
+
+
+def _run_gsc_insights(argv: list[str]) -> None:
+    """Handle: python main.py gsc-insights <file> [--project NAME] [--min-impressions N]"""
+    parser = argparse.ArgumentParser(
+        prog="main.py gsc-insights",
+        description="Analyse a GSC query export for quick wins, cannibalisation, and gaps.",
+    )
+    parser.add_argument("gsc_file", help="Path to GSC export CSV")
+    parser.add_argument("--project", metavar="NAME",
+                        help="Project name — output goes to projects/NAME/")
+    parser.add_argument("--min-impressions", type=int, default=50, metavar="N",
+                        help="Minimum impressions to include a query (default: 50)")
+    args = parser.parse_args(argv)
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print(
+            "ERROR: ANTHROPIC_API_KEY is not set.\n"
+            "Export it before running:\n"
+            "  export ANTHROPIC_API_KEY=sk-ant-...",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    project_dir = None
+    if args.project:
+        project_dir = os.path.join(REPO_ROOT, "projects", args.project)
+        os.makedirs(project_dir, exist_ok=True)
+
+    from modules.gsc_insights import run as gsc_run
+    gsc_run(
+        gsc_file=args.gsc_file,
+        project_dir=project_dir,
+        min_impressions=args.min_impressions,
+    )
+
+
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "qualify-backlinks":
+        _run_qualify_backlinks(sys.argv[2:])
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "gsc-insights":
+        _run_gsc_insights(sys.argv[2:])
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "relevance-score":
+        _run_relevance_score(sys.argv[2:])
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "cluster-audit":
+        _run_cluster_audit(sys.argv[2:])
+        return
+
     parser = argparse.ArgumentParser(
         description="SEO audit agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--project",      metavar="NAME", help="Project name (uses projects/NAME/)")
-    parser.add_argument("--pro",          action="store_true", help="Enable premium features")
-    parser.add_argument("--tiered",       action="store_true", help="Use cost-curve routing [requires --pro]")
-    parser.add_argument("--rewrite",      action="store_true", help="Generate rewrite suggestions [requires --pro]")
-    parser.add_argument("--auto",            action="store_true", help="Auto-skip URLs requiring human review")
-    parser.add_argument("--voice-sample",    metavar="PATH",      help="Path to voice sample file [requires --rewrite]")
-    parser.add_argument("--email",           metavar="RECIPIENT", help="Email report to this address after run [requires --pro]")
-    parser.add_argument("--pagespeed",       action="store_true", help="Enable PageSpeed Insights check per URL [requires --pro]")
-    parser.add_argument("--structured-data", action="store_true", help="Enable JSON-LD structured data validation [requires --pro]")
+    parser.add_argument("--project",        metavar="NAME",      help="Project name (uses projects/NAME/)")
+    parser.add_argument("--tiered",         action="store_true", help="Use cost-curve tiered routing (Tier1 > Haiku > Sonnet)")
+    parser.add_argument("--rewrite",        action="store_true", help="Generate rewrite suggestions")
+    parser.add_argument("--auto",           action="store_true", help="Auto-skip URLs requiring human review")
+    parser.add_argument("--voice-sample",   metavar="PATH",      help="Path to voice sample file (used with --rewrite)")
+    parser.add_argument("--email",          metavar="RECIPIENT", help="Email report to this address after run")
+    parser.add_argument("--pagespeed",      action="store_true", help="Enable PageSpeed Insights check per URL")
+    parser.add_argument("--structured-data",action="store_true", help="Enable JSON-LD structured data validation")
     args = parser.parse_args()
 
-    # --- Flag dependency checks ---
-    if args.tiered and not args.pro:
-        print("ERROR: --tiered requires --pro", file=sys.stderr)
-        sys.exit(1)
-    if args.rewrite and not args.pro:
-        print("ERROR: --rewrite requires --pro", file=sys.stderr)
-        sys.exit(1)
     if args.voice_sample and not args.rewrite:
         print("ERROR: --voice-sample requires --rewrite", file=sys.stderr)
         sys.exit(1)
-    if args.pagespeed and not args.pro:
-        print("This feature requires --pro", file=sys.stderr)
-        sys.exit(1)
-    if args.structured_data and not args.pro:
-        print("This feature requires --pro", file=sys.stderr)
-        sys.exit(1)
-    if args.email and not args.pro:
-        print("This feature requires --pro", file=sys.stderr)
-        sys.exit(1)
-
-    # --- License check (exits if --pro without key) ---
-    check_license()
 
     # --- API key check ---
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -401,11 +544,9 @@ if __name__ == "__main__":
         python = sys.executable
         script = __file__
 
-        def _run_proc(argv, env_extra=None, strip_license=True):
+        def _run_proc(argv, env_extra=None):
             env = os.environ.copy()
-            env.pop("_SEO_MAIN_MODE", None)   # subprocesses call main(), not tests
-            if strip_license:
-                env.pop("SEO_AGENT_LICENSE", None)
+            env.pop("_SEO_MAIN_MODE", None)
             if env_extra:
                 env.update(env_extra)
             r = subprocess.run([python, script] + argv,
@@ -444,110 +585,24 @@ if __name__ == "__main__":
         run_test("2: --project reads/writes from projects/NAME/", test_project_flag)
 
         # ------------------------------------------------------------------ #
-        # Test 3: --pro without SEO_AGENT_LICENSE -> exit 1 + error           #
+        # Test 3: --tiered flag accepted, routes through cost curve           #
         # ------------------------------------------------------------------ #
-        def test_pro_without_license():
-            rc, out = _run_proc(["--pro"])
-            assert rc == 1, f"Expected exit 1, got {rc}"
-            assert "ERROR" in out and "SEO_AGENT_LICENSE" in out, \
-                f"Expected license error, got: {out!r}"
-        run_test("3: --pro without license -> exit 1 + clear error", test_pro_without_license)
-
-        # ------------------------------------------------------------------ #
-        # Test 4: --tiered without --pro -> exit 1 + "requires --pro"         #
-        # ------------------------------------------------------------------ #
-        def test_tiered_without_pro():
-            rc, out = _run_proc(["--tiered"])
-            assert rc == 1, f"Expected exit 1, got {rc}"
-            assert "requires --pro" in out.lower() or "--pro" in out, \
-                f"Expected --pro message, got: {out!r}"
-        run_test("4: --tiered without --pro -> exit 1 + requires --pro", test_tiered_without_pro)
-
-        # ------------------------------------------------------------------ #
-        # Test 5: after completed run, state.json history[] has new entry     #
-        # ------------------------------------------------------------------ #
-        def test_history_appended():
-            import core.state as sm
-            import core.reporter as rm
-
-            proj_dir = os.path.join(REPO_ROOT, "projects", "_test_history_t5")
-            os.makedirs(os.path.join(proj_dir, "reports"), exist_ok=True)
-            csv_path   = os.path.join(proj_dir, "input.csv")
-            state_path = os.path.join(proj_dir, "state.json")
-
-            test_url = "https://example.com/already-done"
-            with open(csv_path, "w") as f:
-                f.write(f"url\n{test_url}\n")
-            with open(state_path, "w") as f:
-                json.dump({"audited": [test_url], "pending": [], "needs_human": [], "history": []}, f)
-
-            orig_state_file   = sm.STATE_FILE
-            orig_report_json  = rm.REPORT_JSON
-            orig_report_sum   = rm.REPORT_SUMMARY
-            sm.STATE_FILE     = state_path
-            rm.REPORT_JSON    = os.path.join(proj_dir, "report.json")
-            rm.REPORT_SUMMARY = os.path.join(proj_dir, "report-summary.txt")
-
-            try:
-                import argparse as _ap
-                test_args = _ap.Namespace(
-                    project="_test_history_t5", pro=False, tiered=False,
-                    rewrite=False, auto=True, voice_sample=None,
-                )
-                paths = _get_paths("_test_history_t5")
-                _patch_core_modules(paths)
-
-                run_id = datetime.now(timezone.utc).isoformat()
-                stats  = run_audit(test_args, paths)
-
-                record = {
-                    "run_id":       run_id,
-                    "urls_audited": stats["urls_audited"],
-                    "urls_skipped": stats["urls_skipped"],
-                    "pass_count":   stats["pass_count"],
-                    "fail_count":   stats["fail_count"],
-                    "report_path":  paths["report_json"],
-                }
-                append_run_record(record)
-
-                with open(state_path) as f:
-                    saved = json.load(f)
-                assert "history" in saved and len(saved["history"]) >= 1, \
-                    f"Expected history entry, got: {saved.get('history')}"
-                entry = saved["history"][-1]
-                for key in ("run_id", "urls_audited", "urls_skipped", "pass_count", "fail_count", "report_path"):
-                    assert key in entry, f"Missing key {key} in history entry"
-            finally:
-                sm.STATE_FILE     = orig_state_file
-                rm.REPORT_JSON    = orig_report_json
-                rm.REPORT_SUMMARY = orig_report_sum
-                shutil.rmtree(proj_dir, ignore_errors=True)
-
-        run_test("5: completed run appends history entry with correct keys", test_history_appended)
-
-        # ------------------------------------------------------------------ #
-        # Test 6: --pro --tiered routes through cost curve                    #
-        # ------------------------------------------------------------------ #
-        def test_pro_tiered_routes_cost_curve():
+        def test_tiered_routes_cost_curve():
             import core.state as sm
             import core.reporter as rm
             import premium.cost_curve as cc
 
-            proj_dir   = os.path.join(REPO_ROOT, "projects", "_test_tiered_t6")
+            proj_dir   = os.path.join(REPO_ROOT, "projects", "_test_tiered_t3")
             os.makedirs(os.path.join(proj_dir, "reports"), exist_ok=True)
-            csv_path   = os.path.join(proj_dir, "input.csv")
             state_path = os.path.join(proj_dir, "state.json")
 
             test_url = "https://example.com/tiered-test"
-            with open(csv_path, "w") as f:
-                f.write(f"url\n{test_url}\n")
+            with open(os.path.join(proj_dir, "input.csv"), "w") as f:
+                f.write("url\n" + test_url + "\n")
             with open(state_path, "w") as f:
                 json.dump({"audited": [], "pending": [], "needs_human": [], "history": []}, f)
 
-            orig_state   = sm.STATE_FILE
-            orig_rjson   = rm.REPORT_JSON
-            orig_rsum    = rm.REPORT_SUMMARY
-            paths = _get_paths("_test_tiered_t6")
+            paths = _get_paths("_test_tiered_t3")
             _patch_core_modules(paths)
 
             fake_snapshot = {
@@ -572,44 +627,82 @@ if __name__ == "__main__":
             try:
                 import argparse as _ap
                 test_args = _ap.Namespace(
-                    project="_test_tiered_t6", pro=True, tiered=True,
+                    project="_test_tiered_t3", tiered=True,
                     rewrite=False, auto=True, voice_sample=None,
+                    email=None, pagespeed=False, structured_data=False,
                 )
-                # Patch fetch_page in __main__ globals (where run_audit closes over it)
                 _main_mod = sys.modules["__main__"]
                 orig_fetch_fn  = _main_mod.fetch_page
                 orig_audit_url = cc.audit_url
-
                 _main_mod.fetch_page = lambda url: fake_snapshot
                 cc.audit_url         = fake_tiered
-
-                import config as _cfg
-                orig_is_pro = _cfg.is_pro
-                _cfg.is_pro = lambda: True
-                orig_main_is_pro = _main_mod.is_pro
-                _main_mod.is_pro = lambda: True
-
                 try:
-                    stats = run_audit(test_args, paths)
+                    run_audit(test_args, paths)
                 finally:
                     _main_mod.fetch_page = orig_fetch_fn
                     cc.audit_url         = orig_audit_url
-                    _cfg.is_pro          = orig_is_pro
-                    _main_mod.is_pro     = orig_main_is_pro
 
                 assert len(tiered_calls) == 1, f"Expected 1 tiered call, got {tiered_calls}"
                 assert tiered_calls[0] is True, "audit_url not called with tiered=True"
             finally:
-                sm.STATE_FILE     = orig_state
-                rm.REPORT_JSON    = orig_rjson
-                rm.REPORT_SUMMARY = orig_rsum
                 shutil.rmtree(proj_dir, ignore_errors=True)
 
-        run_test("6: --pro --tiered routes through cost curve (audit_url called with tiered=True)", test_pro_tiered_routes_cost_curve)
+        run_test("3: --tiered routes through cost curve (no license needed)", test_tiered_routes_cost_curve)
+
+        # ------------------------------------------------------------------ #
+        # Test 4: completed run appends history entry                         #
+        # ------------------------------------------------------------------ #
+        def test_history_appended():
+            import core.state as sm
+            import core.reporter as rm
+
+            proj_dir   = os.path.join(REPO_ROOT, "projects", "_test_history_t4")
+            os.makedirs(os.path.join(proj_dir, "reports"), exist_ok=True)
+            csv_path   = os.path.join(proj_dir, "input.csv")
+            state_path = os.path.join(proj_dir, "state.json")
+
+            test_url = "https://example.com/already-done"
+            with open(csv_path, "w") as f:
+                f.write("url\n" + test_url + "\n")
+            with open(state_path, "w") as f:
+                json.dump({"audited": [test_url], "pending": [], "needs_human": [], "history": []}, f)
+
+            paths = _get_paths("_test_history_t4")
+            _patch_core_modules(paths)
+
+            try:
+                import argparse as _ap
+                test_args = _ap.Namespace(
+                    project="_test_history_t4", tiered=False,
+                    rewrite=False, auto=True, voice_sample=None,
+                    email=None, pagespeed=False, structured_data=False,
+                )
+                run_id = datetime.now(timezone.utc).isoformat()
+                stats  = run_audit(test_args, paths)
+                record = {
+                    "run_id":       run_id,
+                    "urls_audited": stats["urls_audited"],
+                    "urls_skipped": stats["urls_skipped"],
+                    "pass_count":   stats["pass_count"],
+                    "fail_count":   stats["fail_count"],
+                    "report_path":  paths["report_json"],
+                }
+                append_run_record(record)
+
+                with open(state_path) as f:
+                    saved = json.load(f)
+                assert "history" in saved and len(saved["history"]) >= 1
+                entry = saved["history"][-1]
+                for key in ("run_id", "urls_audited", "urls_skipped", "pass_count", "fail_count", "report_path"):
+                    assert key in entry, f"Missing key {key}"
+            finally:
+                shutil.rmtree(proj_dir, ignore_errors=True)
+
+        run_test("4: completed run appends history entry with correct keys", test_history_appended)
 
         print()
         if failures:
             print(f"{len(failures)} test(s) failed: {failures}")
             sys.exit(1)
         else:
-            print("All 6 acceptance tests passed.")
+            print("All 4 acceptance tests passed.")

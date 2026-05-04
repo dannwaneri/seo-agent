@@ -8,6 +8,12 @@ report.json
 report-summary.txt
 reports/
 projects/
+*-state.json
+*-report.md
+
+# Working / draft files
+article-draft.md
+my-writing.txt
 
 # Python
 __pycache__/

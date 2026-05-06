@@ -15,6 +15,12 @@ projects/
 article-draft.md
 my-writing.txt
 
+# Sample inputs (contain personal domain data)
+input.csv
+
+# Legacy premium modules (optional, not required for open-source use)
+premium/
+
 # Python
 __pycache__/
 *.pyc

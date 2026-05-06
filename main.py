@@ -267,22 +267,23 @@ def run_audit(args: argparse.Namespace, paths: dict) -> dict:
     # f. Summary
     write_summary()
 
-    # g. Pro: generate PDF
+    # g. Generate PDF if premium module available
     generated_pdf_path = None
-    if pro and (urls_audited > 0):
-        from premium.enhanced_reporter import generate_pdf
-        project_name = args.project or "default"
-        pdf_path = os.path.join(paths["reports_dir"], "audit_report.pdf")
-        os.makedirs(paths["reports_dir"], exist_ok=True)
+    if urls_audited > 0:
         try:
+            from premium.enhanced_reporter import generate_pdf
+            project_name = args.project or "default"
+            pdf_path = os.path.join(paths["reports_dir"], "audit_report.pdf")
+            os.makedirs(paths["reports_dir"], exist_ok=True)
             generate_pdf(results, project_name, pdf_path)
             generated_pdf_path = pdf_path
             print(f"PDF report saved to {pdf_path}")
-        except Exception as exc:
-            print(f"[main] PDF generation failed: {exc}", file=sys.stderr)
+        except (ImportError, Exception) as exc:
+            if not isinstance(exc, ImportError):
+                print(f"[main] PDF generation failed: {exc}", file=sys.stderr)
 
-    # h. Pro: email report
-    if pro and email_recipient:
+    # h. Email report if recipient set
+    if email_recipient:
         from premium.email_reporter import send_report_email
         project_name = getattr(args, "project", None) or "default"
         summary_dict = {

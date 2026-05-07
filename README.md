@@ -2,6 +2,8 @@
 
 A local SEO co-pilot built with Python, Browser Use, and the Claude API. Visits real pages in a visible browser window, extracts SEO signals, checks for broken links, scores backlinks, surfaces GSC quick wins, maps internal link clusters, and writes structured reports — resumable if interrupted.
 
+![seo-agent visiting a page in a real Chromium browser](screenshots/demo.png)
+
 Ran it on my own sites. Found a title cannibalising its own homepage, a position 9.5 query with 0% CTR, two missing internal links, and an orphan page with no path to it.
 
 Everything is open source.
@@ -138,6 +140,14 @@ With AI rewrite suggestions:
 ```bash
 python main.py --rewrite --auto
 python main.py --rewrite --voice-sample my-writing-sample.txt --auto
+```
+
+With viewport screenshots (saves one PNG per URL to `screenshots/`):
+
+```bash
+python main.py --tiered --screenshot
+# screenshots/dannwaneri-com.png
+# screenshots/dannwaneri-com-ai-agents.png
 ```
 
 ### Standalone modules

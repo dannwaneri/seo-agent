@@ -126,14 +126,25 @@ def _pause_reason(snapshot: dict) -> str:
 # Core audit loop
 # ---------------------------------------------------------------------------
 
+def _url_to_slug(url: str) -> str:
+    """Convert a URL to a safe filename stem: https://foo.com/bar/ -> foo-com-bar"""
+    import re
+    slug = re.sub(r"https?://", "", url)
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", slug)
+    return slug.strip("-")
+
+
 def run_audit(args: argparse.Namespace, paths: dict) -> dict:
     """Run the audit loop. Returns run statistics dict."""
     use_tiered          = args.tiered
     use_rewrite         = args.rewrite
     use_pagespeed       = getattr(args, "pagespeed", False)
     use_structured_data = getattr(args, "structured_data", False)
+    use_screenshot      = getattr(args, "screenshot", False)
     email_recipient     = getattr(args, "email", None)
     auto               = args.auto
+
+    screenshots_dir = os.path.join(os.path.dirname(paths["report_json"]), "screenshots")
 
     # Resolve PageSpeed API key once at startup
     pagespeed_key = None
@@ -174,7 +185,10 @@ def run_audit(args: argparse.Namespace, paths: dict) -> dict:
 
             # a. Browser fetch + HITL
             while True:
-                snapshot = fetch_page(url)
+                shot_path = None
+                if use_screenshot:
+                    shot_path = os.path.join(screenshots_dir, f"{_url_to_slug(url)}.png")
+                snapshot = fetch_page(url, screenshot_path=shot_path)
 
                 if should_pause(snapshot):
                     reason = _pause_reason(snapshot)
@@ -478,6 +492,7 @@ def main() -> None:
     parser.add_argument("--email",          metavar="RECIPIENT", help="Email report to this address after run")
     parser.add_argument("--pagespeed",      action="store_true", help="Enable PageSpeed Insights check per URL")
     parser.add_argument("--structured-data",action="store_true", help="Enable JSON-LD structured data validation")
+    parser.add_argument("--screenshot",     action="store_true", help="Save a viewport screenshot per URL to screenshots/")
     args = parser.parse_args()
 
     if args.voice_sample and not args.rewrite:

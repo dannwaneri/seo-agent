@@ -5,7 +5,7 @@ import time
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 
-def fetch_page(url: str) -> dict:
+def fetch_page(url: str, screenshot_path: str | None = None) -> dict:
     result = {
         "final_url": None,
         "status_code": None,
@@ -80,6 +80,14 @@ def fetch_page(url: str) -> dict:
                     result["raw_html"] = page.content()
                 except Exception:
                     pass
+
+                if screenshot_path:
+                    try:
+                        import os as _os
+                        _os.makedirs(_os.path.dirname(screenshot_path), exist_ok=True)
+                        page.screenshot(path=screenshot_path, full_page=False)
+                    except Exception as _exc:
+                        print(f"[browser] Screenshot failed: {_exc}", file=sys.stderr)
 
         except PlaywrightTimeout:
             result["status_code"] = first_status["code"] or 408

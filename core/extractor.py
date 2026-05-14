@@ -102,8 +102,14 @@ def extract(snapshot: dict) -> dict:
     try:
         result = json.loads(cleaned)
     except json.JSONDecodeError as exc:
-        print(f"[extractor] JSON parse error: {exc}\nRaw response:\n{raw}", file=sys.stderr)
-        return _error_result(snapshot, f"Invalid JSON from Claude: {exc}")
+        # Claude sometimes outputs \<char> where <char> is not a valid JSON escape.
+        # Strip invalid backslash escapes and retry.
+        try:
+            normalized = re.sub(r'\\(?!["\\/bfnrtu])', r'', cleaned)
+            result = json.loads(normalized)
+        except json.JSONDecodeError:
+            print(f"[extractor] JSON parse error: {exc}\nRaw response:\n{raw}", file=sys.stderr)
+            return _error_result(snapshot, f"Invalid JSON from Claude: {exc}")
 
     return result
 

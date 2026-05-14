@@ -463,6 +463,72 @@ def _run_gsc_insights(argv: list[str]) -> None:
     )
 
 
+def _run_serp_features(argv: list[str]) -> None:
+    """Handle: python main.py serp-features (--query Q | --queries FILE) [--project NAME] [--max N]"""
+    parser = argparse.ArgumentParser(
+        prog="main.py serp-features",
+        description="Detect SERP features (featured snippet, PAA, images, video, local, KP) for target queries.",
+    )
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--query",   metavar="QUERY", help="Single query to check")
+    group.add_argument("--queries", metavar="FILE",  help="GSC CSV or plain text file of queries (one per line)")
+    parser.add_argument("--project", metavar="NAME", help="Project name — output goes to projects/NAME/")
+    parser.add_argument("--max",     type=int, default=20, metavar="N",
+                        help="Max queries to check from file (default: 20)")
+    args = parser.parse_args(argv)
+
+    project_dir = None
+    if args.project:
+        project_dir = os.path.join(REPO_ROOT, "projects", args.project)
+        os.makedirs(project_dir, exist_ok=True)
+
+    from modules.serp_features import run as serp_run
+    serp_run(
+        query=args.query,
+        queries_file=args.queries,
+        project_dir=project_dir,
+        max_queries=args.max,
+    )
+
+
+def _run_llm_visibility(argv: list[str]) -> None:
+    """Handle: python main.py llm-visibility --domain D --queries FILE [--project NAME] [--max N]"""
+    parser = argparse.ArgumentParser(
+        prog="main.py llm-visibility",
+        description="Check whether your domain appears in Claude's answers to your target queries.",
+    )
+    parser.add_argument("--domain",  required=True, metavar="DOMAIN",
+                        help='Your domain, e.g. "dannwaneri.com"')
+    parser.add_argument("--queries", required=True, metavar="FILE",
+                        help="GSC CSV or plain text file of queries (one per line)")
+    parser.add_argument("--project", metavar="NAME", help="Project name — output goes to projects/NAME/")
+    parser.add_argument("--max",     type=int, default=20, metavar="N",
+                        help="Max queries to check (default: 20)")
+    args = parser.parse_args(argv)
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print(
+            "ERROR: ANTHROPIC_API_KEY is not set.\n"
+            "Export it before running:\n"
+            "  export ANTHROPIC_API_KEY=sk-ant-...",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    project_dir = None
+    if args.project:
+        project_dir = os.path.join(REPO_ROOT, "projects", args.project)
+        os.makedirs(project_dir, exist_ok=True)
+
+    from modules.llm_visibility import run as llm_run
+    llm_run(
+        domain=args.domain,
+        queries_input=args.queries,
+        project_dir=project_dir,
+        max_queries=args.max,
+    )
+
+
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "qualify-backlinks":
         _run_qualify_backlinks(sys.argv[2:])
@@ -478,6 +544,14 @@ def main() -> None:
 
     if len(sys.argv) > 1 and sys.argv[1] == "cluster-audit":
         _run_cluster_audit(sys.argv[2:])
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "serp-features":
+        _run_serp_features(sys.argv[2:])
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "llm-visibility":
+        _run_llm_visibility(sys.argv[2:])
         return
 
     parser = argparse.ArgumentParser(

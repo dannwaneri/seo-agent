@@ -27,6 +27,7 @@ Everything is open source.
 - [Contributing](#contributing)
 - [Writing](#writing)
 - [License](#license)
+- [Limitations](#limitations)
 
 ---
 
@@ -47,6 +48,8 @@ Everything is open source.
 - `gsc-insights` — parse a Search Console export and find quick wins and cannibalisation
 - `relevance-score` — score candidate pages as internal link sources for a target URL
 - `cluster-audit` — map your full site into topic clusters, find orphans and missing hubs
+- `serp-features` — query SerpApi for each target query and detect which SERP features are present (AI Overview, featured snippet, PAA, image pack, video results, local pack, knowledge panel)
+- `llm-visibility` — query Claude with your target queries and check whether your domain appears in the responses
 
 ---
 
@@ -54,7 +57,8 @@ Everything is open source.
 
 - [Browser Use](https://github.com/browser-use/browser-use) — real browser navigation via Playwright
 - [Anthropic Claude API](https://console.anthropic.com) — structured SEO signal extraction (Haiku for modules, Sonnet for core)
-- [httpx](https://www.python-httpx.org/) — async broken link detection
+- [SerpApi](https://serpapi.com) — structured SERP data for feature detection (free tier: 100 searches/month)
+- [httpx](https://www.python-httpx.org/) — async broken link detection and SerpApi calls
 - Python 3.11+, flat JSON state files, no database required
 
 ---
@@ -180,6 +184,41 @@ python main.py cluster-audit --pages pages.txt
 python main.py cluster-audit --pages pages.txt --project acme
 ```
 
+**SERP feature detection** — detect which SERP features are present for your target queries (via SerpApi):
+
+```bash
+# single query
+python main.py serp-features --query "does twitch pay nigerians" --project naija-payments
+
+# from a GSC export (checks top 20 queries by impressions)
+python main.py serp-features --queries gsc-export.csv --project naija-payments
+
+# plain text file, one query per line
+python main.py serp-features --queries queries.txt --max 10 --project acme
+```
+
+Requires a SerpApi key (free tier: 100 searches/month, no credit card):
+
+```bash
+export SERPAPI_KEY="your-key-here"
+```
+
+Outputs `serp-features.md` — a feature matrix table and per-query opportunity notes.
+
+**LLM visibility checker** — check whether Claude cites your domain when answering your target queries:
+
+```bash
+# against a plain text file of queries
+python main.py llm-visibility --domain dannwaneri.com --queries queries.txt --project dannwaneri-com
+
+# against a GSC export (checks top 20 queries by impressions)
+python main.py llm-visibility --domain naija-vpn.com --queries gsc-export.csv --project naija-payments
+```
+
+Outputs `llm-visibility.md` — a visibility score, per-query results, and improvement notes.
+
+> **Limitations:** Claude has a training data cutoff. Content published after that cutoff will not appear regardless of quality — this is a baseline measurement, not a real-time ranking. Re-run quarterly. A score of 0% on a new site is expected; it reflects historical data availability, not content quality.
+
 ---
 
 ## Modules
@@ -223,6 +262,32 @@ Tiers: Strong Link (≥75), Good Opportunity (55–74), Possible (35–54), Skip
 ### Cluster Audit
 
 Builds the full internal link graph from a page list. Counts incoming links per page — zero incoming means orphan. Sends the complete graph to Haiku: cluster mapping, missing hub detection, cross-cluster link suggestions, and a prioritised fix list.
+
+### SERP Feature Detector
+
+Calls SerpApi for each query and detects seven feature types from the structured JSON response — no browser, no CAPTCHA, no bot detection:
+
+| Feature | What it means for you |
+|---------|----------------------|
+| AI Overview | Google is summarising this topic — open with a direct 40–60 word answer; use structured headings |
+| Featured snippet | Optimise for answer-box format — direct answer in first paragraph |
+| People Also Ask | Add an FAQ section using the exact PAA question wording as `<h3>` headings |
+| Image pack | Add optimised images with keyword-matching alt text and file names |
+| Video results | A short explainer video could rank in this slot |
+| Local pack | Organic intent is local; consider whether this query is worth targeting |
+| Knowledge panel | Entity query — structured data and authoritative content help |
+
+Results write to `serp-features.md` with a feature matrix and per-query opportunities.
+
+Requires a free SerpApi account ([serpapi.com](https://serpapi.com)) — 100 searches/month free, no credit card. Set `SERPAPI_KEY` in your environment before running.
+
+### LLM Visibility Checker
+
+Queries Claude Haiku with each of your target queries and checks whether your domain appears in the response. Tells you where your content has enough presence in Claude's training data to be cited organically.
+
+Results write to `llm-visibility.md` with a visibility score (cited / total queries), per-query context excerpts, and a list of gaps to address.
+
+**Limitations:** Claude has a training data cutoff. Content published after that cutoff will not appear regardless of quality — a score of 0% on a new domain is expected and reflects data availability, not content quality. Re-run this quarterly to track progress as training data updates. This module does not test Perplexity, ChatGPT, or other LLMs — only Claude.
 
 ---
 
@@ -313,6 +378,7 @@ python main.py --auto
 | Variable | Required for | Notes |
 |----------|-------------|-------|
 | `ANTHROPIC_API_KEY` | Everything | Claude API access |
+| `SERPAPI_KEY` | `serp-features` | Free at [serpapi.com](https://serpapi.com) — 100 searches/month, no credit card |
 | `PAGESPEED_API_KEY` | `--pagespeed` | Free at [console.cloud.google.com](https://console.cloud.google.com) |
 | `SMTP_HOST` | `--email` | e.g. `smtp.gmail.com` |
 | `SMTP_PORT` | `--email` | e.g. `587` |
@@ -345,7 +411,9 @@ seo-agent/
 │   ├── backlink_qualifier.py
 │   ├── cluster_audit.py
 │   ├── gsc_insights.py
-│   └── relevance_scorer.py
+│   ├── relevance_scorer.py
+│   ├── serp_features.py   # Real-browser SERP feature detection
+│   └── llm_visibility.py  # Claude-based LLM visibility checker
 │
 ├── prompts/              # Haiku prompt templates for each module
 │   ├── backlink_qualifier.md
@@ -392,6 +460,33 @@ Articles about building and running this agent:
 - [How to Build a Cost-Efficient AI Agent with Tiered Model Routing](https://www.freecodecamp.org/news/how-to-build-a-cost-efficient-ai-agent-with-tiered-model-routing/) — freeCodeCamp
 - [I Built a Local AI Agent That Audits My Own Articles — It Flagged Every Single One](https://dev.to/dannwaneri/i-built-a-local-ai-agent-that-audits-my-own-articles-it-flagged-every-single-one-pkh) — dev.to
 - [I Gave My SEO Agent a Real Site. It Found Bugs I'd Missed for Weeks.](https://dannwaneri.com) — the co-pilot build with all 4 modules
+
+---
+
+## Limitations
+
+Known constraints to be aware of before running:
+
+**Core audit**
+- Runs headfully (visible browser window) — not designed for server-side CI pipelines
+- Per-URL delay of 2 seconds is intentional; removing it may cause rate-limiting on target servers
+- Broken link checker only checks same-domain links by default
+
+**SERP feature detection (`serp-features`)**
+- Requires a SerpApi key (`SERPAPI_KEY`). Free tier is 100 searches/month — enough for ~15–20 target queries run monthly.
+- Results reflect the SERP at time of the API call. SerpApi uses residential proxies to retrieve real Google results, so data is accurate but not guaranteed to match what you'd see from your exact location.
+- AI Overview detection checks the `ai_overview` top-level key and `related_questions` type — if Google changes how it structures this in the response, the detection may need updating.
+
+**LLM visibility (`llm-visibility`)**
+- Only tests Claude (Haiku model) — does not check Perplexity, ChatGPT, Gemini, or others
+- Claude has a training data cutoff; recently published content will not appear regardless of quality
+- A visibility score of 0% on a site less than 1–2 years old is normal and expected
+- Results reflect Claude's training data snapshot, not real-time search indexing — re-run quarterly
+- The system prompt encourages Claude to cite sources, but Claude may answer correctly without citing any URL
+
+**Backlink qualifier**
+- Scores are Claude's assessment based on page content at time of fetch — not Ahrefs/Moz DR scores
+- Cache (`backlink-state.json`) is never invalidated automatically; stale entries accumulate over time
 
 ---
 

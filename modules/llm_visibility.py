@@ -48,6 +48,11 @@ def _query_claude(query: str, domain: str, client: anthropic.Anthropic) -> dict:
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": query}],
         )
+        try:
+            from core.attestation_setup import record as _record_fingerprint
+            _record_fingerprint(message, module_name="llm_visibility", model_fallback=_MODEL)
+        except Exception:
+            pass  # instrumentation can never break the agent
         response_text = message.content[0].text
         result["response_excerpt"] = (
             response_text[:400] + "..." if len(response_text) > 400 else response_text

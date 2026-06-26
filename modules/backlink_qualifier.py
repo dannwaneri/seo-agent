@@ -162,6 +162,12 @@ def _haiku_score(snapshot: dict, niche: str, system_prompt: str) -> dict:
     except anthropic.APIError as exc:
         return {"error": f"Haiku API error: {exc}"}
 
+    try:
+        from core.attestation_setup import record as _record_fingerprint
+        _record_fingerprint(message, module_name="backlink_qualifier", model_fallback=_HAIKU_MODEL)
+    except Exception:
+        pass  # instrumentation can never break the agent
+
     raw = message.content[0].text
     cleaned = _strip_fences(raw)
 

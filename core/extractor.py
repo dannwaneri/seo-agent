@@ -96,6 +96,12 @@ def extract(snapshot: dict) -> dict:
         print(f"[extractor] Claude API error: {exc}", file=sys.stderr)
         return _error_result(snapshot, str(exc))
 
+    try:
+        from core.attestation_setup import record as _record_fingerprint
+        _record_fingerprint(message, module_name="extractor", model_fallback=MODEL)
+    except Exception:
+        pass  # instrumentation can never break the agent
+
     raw = message.content[0].text
     cleaned = _strip_fences(raw)
 

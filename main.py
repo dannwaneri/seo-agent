@@ -569,6 +569,14 @@ def main() -> None:
     parser.add_argument("--screenshot",     action="store_true", help="Save a viewport screenshot per URL to screenshots/")
     args = parser.parse_args()
 
+    # Wire the active project name into attestation fingerprints (opt-in, no-op
+    # if not configured). See core/attestation_setup.py.
+    try:
+        from core.attestation_setup import configure_project
+        configure_project(args.project)
+    except Exception:
+        pass  # never let instrumentation break the agent
+
     if args.voice_sample and not args.rewrite:
         print("ERROR: --voice-sample requires --rewrite", file=sys.stderr)
         sys.exit(1)

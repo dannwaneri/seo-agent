@@ -22,6 +22,7 @@ Everything is open source.
 - [PASS/FAIL Rules](#passfail-rules)
 - [Cost](#cost)
 - [Scheduling](#scheduling)
+- [Attestation Verification](#attestation-verification-optional)
 - [Environment Variables](#environment-variables)
 - [Architecture](#architecture)
 - [Contributing](#contributing)
@@ -373,6 +374,30 @@ python main.py --auto
 
 ---
 
+## Attestation Verification (Optional)
+
+seo-agent ships with opt-in instrumentation that cross-checks each Claude API call against Anthropic's billing-side usage records — independent verification that catches ghost calls, model substitution, and token-count drift. The pattern lives in [`production-safe-agent-loop`](https://github.com/dannwaneri/production-safe-agent-loop); seo-agent is the first real workload wired into it.
+
+**Opt-in.** If `ATTESTATION_LEDGER_DB` is unset (default), every instrumentation point is a no-op. seo-agent runs identically — same behavior, same outputs, no SQLite writes, no overhead. Set the env vars only if you want shadow-mode verification.
+
+**How it works:**
+
+- Each of the six Claude-calling modules records a fingerprint (timestamp, model, tokens in/out) after a successful `messages.create()`. Fingerprints land in a local SQLite database.
+- `run_verifier.py` compares fingerprints against Anthropic's usage records, in one of two modes:
+  - **Admin API mode** — hits `/v1/organizations/usage_report/messages` automatically (Team/Enterprise orgs only).
+  - **CSV mode** — reads an exported CSV from Console > Analytics > Usage (works on individual orgs).
+- Drift findings get written to an append-only `diff_reports` table for review.
+
+**Safety guarantees** — three independent failsafes:
+
+1. Every `record_fingerprint()` call is wrapped in `try/except: pass`. Instrumentation cannot break the agent.
+2. Missing `production-safe-agent-loop` on the path → silent no-op.
+3. Unset `ATTESTATION_LEDGER_DB` → silent no-op.
+
+See `core/attestation_setup.py` for the helper module and `run_verifier.py` for the cron script. Configuration is documented in [`.env.example`](.env.example).
+
+---
+
 ## Environment Variables
 
 | Variable | Required for | Notes |
@@ -385,6 +410,11 @@ python main.py --auto
 | `SMTP_USER` | `--email` | Your email address |
 | `SMTP_PASSWORD` | `--email` | App password recommended |
 | `SMTP_FROM` | `--email` | Sender address |
+| `ATTESTATION_LEDGER_DB` | Attestation (optional) | Path to local SQLite ledger. Unset = instrumentation no-ops. |
+| `PSAL_PATH` | Attestation (optional) | Path to `production-safe-agent-loop` clone. Defaults to `~/production-safe-agent-loop`. |
+| `ANTHROPIC_API_KEY_ID` | Attestation (optional) | API key NAME (or `apikey_01...` id) — what billing records use to identify the key. |
+| `ATTESTATION_USAGE_CSV` | Attestation CSV mode | Path to a CSV exported from Console > Analytics > Usage. |
+| `ANTHROPIC_ADMIN_API_KEY` | Attestation API mode | Admin API key (Team/Enterprise orgs). Skip if using CSV mode. |
 
 ---
 

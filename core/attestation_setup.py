@@ -104,7 +104,11 @@ def _get_attestation():
             ledger_db_path=ledger_db,
             usage_client=_StubUsageClient(),
             api_key_id=api_key_id,
-            workspace_id=os.environ.get("ANTHROPIC_WORKSPACE_ID", "default"),
+            # Blank counts as set for os.environ.get's default arg — treat
+            # it as unset too, or an empty ANTHROPIC_WORKSPACE_ID= silently
+            # tags every fingerprint with workspace_id="" instead of the
+            # fallback, and it'll never match the CSV's "Default".
+            workspace_id=os.environ.get("ANTHROPIC_WORKSPACE_ID") or "default",
         )
     except Exception:
         if os.environ.get("ATTESTATION_DEBUG"):

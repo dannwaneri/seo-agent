@@ -345,7 +345,11 @@ def main() -> int:
         ledger_db_path=ledger_db,
         usage_client=usage_client,
         api_key_id=api_key_id,
-        workspace_id=os.environ.get("ANTHROPIC_WORKSPACE_ID", "default"),
+        # `.get(name, "default")` only falls back when the var is ABSENT —
+        # an empty string ("ANTHROPIC_WORKSPACE_ID=" with nothing after it)
+        # still counts as set, so it silently wins over the fallback and
+        # never matches the CSV's "Default". Treat blank as unset too.
+        workspace_id=os.environ.get("ANTHROPIC_WORKSPACE_ID") or "default",
     )
 
     if csv_path:

@@ -80,6 +80,17 @@ def _get_attestation():
     ledger_db = os.environ.get("ATTESTATION_LEDGER_DB")
     if not ledger_db:
         return None
+    api_key_id = os.environ.get("ANTHROPIC_API_KEY_ID")
+    if not api_key_id:
+        # Fail loudly, record nothing: fingerprints tagged with a guessed
+        # key id would mis-scope every future diff and mimic real drift.
+        print(
+            "[attestation] ANTHROPIC_API_KEY_ID not set — fingerprint "
+            "recording disabled to avoid mis-tagged fingerprints. Set it "
+            "to the API key name shown in the Anthropic Console.",
+            file=sys.stderr,
+        )
+        return None
     try:
         Path(ledger_db).parent.mkdir(parents=True, exist_ok=True)
 
@@ -92,7 +103,7 @@ def _get_attestation():
         _singleton = AttestationFingerprint(
             ledger_db_path=ledger_db,
             usage_client=_StubUsageClient(),
-            api_key_id=os.environ.get("ANTHROPIC_API_KEY_ID", "seo-agent-default"),
+            api_key_id=api_key_id,
             workspace_id=os.environ.get("ANTHROPIC_WORKSPACE_ID", "default"),
         )
     except Exception:
@@ -130,12 +141,21 @@ def record(message, module_name: str = "unknown", model_fallback: str = "unknown
         with _lock:
             turn = _turn_counters.get(module_name, 0) + 1
             _turn_counters[module_name] = turn
+        usage = message.usage
         att.record_fingerprint(
             session_id=f"{_session_id_for()}::{module_name}",
             turn_count=turn,
             model_id=getattr(message, "model", None) or model_fallback,
-            tokens_in=int(getattr(message.usage, "input_tokens", 0)),
-            tokens_out=int(getattr(message.usage, "output_tokens", 0)),
+            tokens_in=int(getattr(usage, "input_tokens", 0) or 0),
+            tokens_out=int(getattr(usage, "output_tokens", 0) or 0),
+            # Billing totals include cache tokens; record them so the
+            # verifier compares like-for-like (finding C2, v2.0 review).
+            tokens_cache_read=int(
+                getattr(usage, "cache_read_input_tokens", 0) or 0
+            ),
+            tokens_cache_write=int(
+                getattr(usage, "cache_creation_input_tokens", 0) or 0
+            ),
         )
     except Exception:
         if os.environ.get("ATTESTATION_DEBUG"):

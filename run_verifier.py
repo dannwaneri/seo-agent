@@ -328,20 +328,43 @@ def main() -> int:
         )
         return 1
 
+    # Fail loudly rather than defaulting: a silently wrong api_key_id
+    # mis-scopes the entire diff and produces the same false-alert
+    # signature as a real drift (finding M3, v2.0 adversarial review).
+    api_key_id = os.environ.get("ANTHROPIC_API_KEY_ID")
+    if not api_key_id:
+        print(
+            "ANTHROPIC_API_KEY_ID is not set. In CSV mode this must be the "
+            "key NAME as shown in the Console (e.g. 'seo-agent-showcase'); "
+            "in Admin API mode the apikey_01... id. Refusing to guess.",
+            file=sys.stderr,
+        )
+        return 1
+
     af = AttestationFingerprint(
         ledger_db_path=ledger_db,
         usage_client=usage_client,
-        api_key_id=os.environ.get("ANTHROPIC_API_KEY_ID", "seo-agent-default"),
+        api_key_id=api_key_id,
         workspace_id=os.environ.get("ANTHROPIC_WORKSPACE_ID", "default"),
     )
 
     if csv_path:
-        # CSV mode: diff across a multi-day window
+        # CSV mode: the Console export is day-bucketed, so the diff MUST run
+        # at day granularity. Minute-level ledger buckets vs day-level
+        # billing buckets share zero keys and alert on 100% of honest
+        # activity (finding C1, v2.0 adversarial review).
         days = int(os.environ.get("ATTESTATION_LOOKBACK_DAYS", "7"))
-        ending_at = datetime.now(timezone.utc)
+        # Whole days only, excluding today: the CSV was exported at some
+        # point during today, so today's bucket is still filling — diffing
+        # it would false-positive on any call made after the export.
+        # (Day-level analog of the minute-level ingestion-lag buffer.)
+        today_start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        ending_at = today_start
         starting_at = ending_at - timedelta(days=days)
-        print(f"[{mode}] diffing {days}-day window: {starting_at.date()} -> {ending_at.date()}")
-        results = af.diff_window(starting_at, ending_at)
+        print(f"[{mode}] diffing {days}-day window: {starting_at.date()} -> {ending_at.date()} (today excluded)")
+        results = af.diff_window(starting_at, ending_at, bucket_width="1d")
     else:
         # Live API mode: minute-level recent buckets
         print(f"[{mode}] diffing recent buckets (15min lookback, 6min lag buffer)")
